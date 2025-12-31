@@ -8,7 +8,7 @@ common:
   model_path: lejepa_robot.pth
 
 collect:
-  num_episodes: 50
+  num_episodes: 5000
   max_steps: 100
   noise_scale: 0.1
   epsilon: 0.2
@@ -18,7 +18,7 @@ collect:
   preview_scale: 4
 
 train:
-  batch_size: 128
+  batch_size: 256
   learning_rate: 0.0005
   epochs: 100
   lambda_coef: 0.05
