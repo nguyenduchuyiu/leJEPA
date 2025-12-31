@@ -5,7 +5,12 @@ Keep this file simple: plain dataclasses with defaults, so all scripts can
 import and reuse the same settings without duplicating constants everywhere.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
+import os
+
+import yaml
 
 
 @dataclass
@@ -66,10 +71,36 @@ class ViewConfig:
     default_stride: int = 1
 
 
-COMMON = CommonConfig()
-COLLECT = CollectConfig()
-TRAIN = TrainConfig()
-INFER = InferenceConfig()
-VIEW = ViewConfig()
+def _apply_overrides(obj, overrides: dict | None):
+    if not overrides:
+        return obj
+    for k, v in overrides.items():
+        if not hasattr(obj, k):
+            continue
+        # normalize list -> tuple for sizes
+        if k in ("img_size", "render_size") and isinstance(v, list):
+            v = tuple(v)
+        setattr(obj, k, v)
+    return obj
+
+
+def _load_yaml_config() -> dict:
+    path = os.path.join(os.path.dirname(__file__), "config.yaml")
+    if not os.path.exists(path):
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    if not isinstance(data, dict):
+        return {}
+    return data
+
+
+_CFG = _load_yaml_config()
+
+COMMON = _apply_overrides(CommonConfig(), _CFG.get("common"))
+COLLECT = _apply_overrides(CollectConfig(), _CFG.get("collect"))
+TRAIN = _apply_overrides(TrainConfig(), _CFG.get("train"))
+INFER = _apply_overrides(InferenceConfig(), _CFG.get("infer"))
+VIEW = _apply_overrides(ViewConfig(), _CFG.get("view"))
 
 

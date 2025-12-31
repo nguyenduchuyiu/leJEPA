@@ -8,7 +8,9 @@ class LeJEPA_Robot(nn.Module):
         super().__init__()
         self.z_dim = z_dim
         
-        # --- Encoder: Image (3, 64, 64) -> z (64) ---
+        # --- Encoder: Image (3, H, W) -> z (z_dim) ---
+        # Use AdaptiveAvgPool2d to support different input sizes (e.g. 64, 96)
+        # while keeping the Linear input feature size stable.
         self.encoder = nn.Sequential(
             nn.Conv2d(3, 32, kernel_size=4, stride=2, padding=1), # -> 32x32
             nn.BatchNorm2d(32), nn.ReLU(),
@@ -18,6 +20,7 @@ class LeJEPA_Robot(nn.Module):
             nn.BatchNorm2d(128), nn.ReLU(),
             nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1), # -> 4x4
             nn.BatchNorm2d(256), nn.ReLU(),
+            nn.AdaptiveAvgPool2d((4, 4)),
             nn.Flatten(),
             nn.Linear(256 * 4 * 4, z_dim),
             # KHÔNG CẦN BatchNorm cuối cùng vì SIGReg sẽ lo việc chuẩn hóa
@@ -37,9 +40,9 @@ class LeJEPA_Robot(nn.Module):
 
     def forward(self, obs, action, next_obs, lambda_coef=0.05): 
         """
-        obs: [B, 3, 64, 64]
+        obs: [B, 3, H, W]
         action: [B, 4]
-        next_obs: [B, 3, 64, 64]
+        next_obs: [B, 3, H, W]
         lambda_coef: Hệ số cân bằng (Bài báo recommend 0.05 [cite: 2794])
         """
         # 1. Encode

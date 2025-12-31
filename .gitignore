@@ -1,1 +1,3 @@
 /data_push_v3/
+*.pyc
+__pycache__/

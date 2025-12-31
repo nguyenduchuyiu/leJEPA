@@ -1,0 +1,42 @@
+common:
+  mujoco_gl: egl
+  task_name: push-v3
+  camera_name: corner
+  img_size: [96, 96]
+  render_size: [128, 128]
+  data_dir: ./data_push_v3
+  model_path: lejepa_robot.pth
+
+collect:
+  num_episodes: 50
+  max_steps: 100
+  noise_scale: 0.1
+  epsilon: 0.2
+  stream_to_npy: true
+  preview: false
+  preview_wait_ms: 1
+  preview_scale: 4
+
+train:
+  batch_size: 128
+  learning_rate: 0.0005
+  epochs: 100
+  lambda_coef: 0.05
+  use_dataparallel: true
+
+infer:
+  horizon: 20
+  num_samples: 2048
+  temperature: 0.1
+  num_episodes: 100
+  max_steps: 200
+  preview: true
+  preview_wait_ms: 1
+  preview_scale: 6
+  use_dataparallel: true
+
+view:
+  default_scale: 6
+  default_stride: 1
+
+
