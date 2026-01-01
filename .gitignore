@@ -1,3 +1,5 @@
-/data_push_v3/
+/data*/
 *.pyc
 __pycache__/
+merge_parts.py
+*.zip

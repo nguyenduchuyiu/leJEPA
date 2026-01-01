@@ -30,10 +30,14 @@ class CollectConfig:
     max_steps: int = 100
     noise_scale: float = 0.3
     epsilon: float = 0.2
+    # Limit worker processes for parallel collection. If None, use cpu_count().
+    num_workers: int | None = None
     stream_to_npy: bool = True
     preview: bool = False
     preview_wait_ms: int = 1
     preview_scale: int = 4
+    # Remove per-worker shard files after merging into obs.npy/actions.npy/next_obs.npy.
+    cleanup_shards: bool = True
 
 
 @dataclass

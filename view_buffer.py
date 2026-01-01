@@ -26,7 +26,7 @@ def main():
     )
     ap.add_argument(
         "--npy_dir",
-        default=None,
+        default=COMMON.data_dir,
         help="Directory containing obs.npy/next_obs.npy/actions.npy/meta.npz produced by 01_collect_data.py (STREAM_TO_NPY).",
     )
     ap.add_argument("--idx", type=int, default=0, help="Start index (default: 0)")

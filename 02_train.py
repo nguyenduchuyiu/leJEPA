@@ -120,6 +120,14 @@ def main():
 
             loss, l_pred, l_reg = model(b_obs, b_act, b_next, lambda_coef=LAMBDA)
 
+            # DataParallel gathers per-GPU scalars into a 1D tensor; reduce to a scalar for backward/logging.
+            if loss.dim() != 0:
+                loss = loss.mean()
+            if l_pred.dim() != 0:
+                l_pred = l_pred.mean()
+            if l_reg.dim() != 0:
+                l_reg = l_reg.mean()
+
             loss.backward()
             optimizer.step()
 
