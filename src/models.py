@@ -110,7 +110,16 @@ class LeJEPA_Robot(nn.Module):
         loss_pred = F.mse_loss(z_next_pred, z_next_target)
         loss_reg = self.sigreg(z_t) + self.sigreg(z_next_target)
         total_loss = (1 - lambda_coef) * loss_pred + lambda_coef * loss_reg
-        
+
+        # Avoid torch.nn.DataParallel gather warning when returning scalars:
+        # "Was asked to gather along dimension 0, but all input tensors were scalars..."
+        if total_loss.dim() == 0:
+            total_loss = total_loss.unsqueeze(0)
+        if loss_pred.dim() == 0:
+            loss_pred = loss_pred.unsqueeze(0)
+        if loss_reg.dim() == 0:
+            loss_reg = loss_reg.unsqueeze(0)
+
         return total_loss, loss_pred, loss_reg
     
     # Hàm tiện ích cho Inference
