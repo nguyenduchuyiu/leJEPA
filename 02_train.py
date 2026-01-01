@@ -59,6 +59,8 @@ def load_buffer(data_dir: str = DATA_DIR, fraction: float = 0.25):
     - STREAM_TO_NPY=False: train_buffer.npz with keys obs/actions/next_obs
     Only loads a given fraction of the data.
     """
+    if not (0 < fraction <= 1.0):
+        raise ValueError(f"fraction must be in (0, 1], got {fraction}")
     npz_path = os.path.join(data_dir, "train_buffer.npz")
     meta_path = os.path.join(data_dir, "meta.npz")
     obs_path = os.path.join(data_dir, "obs.npy")
@@ -68,7 +70,7 @@ def load_buffer(data_dir: str = DATA_DIR, fraction: float = 0.25):
     if os.path.exists(meta_path) and os.path.exists(obs_path) and os.path.exists(actions_path) and os.path.exists(next_obs_path):
         meta = np.load(meta_path)
         n_full = int(meta["n"][0])
-        n = max(1, n_full // 4)  # load 1/4 dữ liệu thôi, ít nhất 1
+        n = max(1, min(n_full, int(n_full * fraction)))
         obs_mm = np.load(obs_path, mmap_mode="r")[:n]
         actions_mm = np.load(actions_path, mmap_mode="r")[:n]
         next_obs_mm = np.load(next_obs_path, mmap_mode="r")[:n]
@@ -77,7 +79,7 @@ def load_buffer(data_dir: str = DATA_DIR, fraction: float = 0.25):
     if os.path.exists(npz_path):
         data = np.load(npz_path)
         total = data["obs"].shape[0]
-        n = max(1, total // 4)  # load 1/4 dữ liệu thôi, ít nhất 1
+        n = max(1, min(total, int(total * fraction)))
         obs = torch.from_numpy(data["obs"][:n]).float().div_(255.0)
         actions = torch.from_numpy(data["actions"][:n]).float()
         next_obs = torch.from_numpy(data["next_obs"][:n]).float().div_(255.0)
