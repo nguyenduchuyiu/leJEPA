@@ -4,6 +4,7 @@ import numpy as np
 from torch.utils.data import Dataset, TensorDataset, DataLoader, Subset
 import matplotlib.pyplot as plt
 import torch
+import torch.nn.functional as F
 from tqdm import tqdm
 
 # Allow running as a script: `python src/train.py`
