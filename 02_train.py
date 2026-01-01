@@ -20,6 +20,7 @@ LEARNING_RATE = TRAIN.learning_rate  # [cite: 2879]
 EPOCHS = TRAIN.epochs           # Train nhanh để test logic trước
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 LAMBDA = TRAIN.lambda_coef         # [cite: 2794] Recommended default
+RANDOM_SHIFT_PX = getattr(TRAIN, "random_shift_px", 0)
 
 # Multi-GPU (optional)
 USE_DATAPARALLEL = TRAIN.use_dataparallel
@@ -91,6 +92,29 @@ def load_buffer(data_dir: str = DATA_DIR, fraction: float = 0.25):
         f"- or {npz_path}"
     )
 
+def random_shift_pair(x: torch.Tensor, y: torch.Tensor, pad: int) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Random shift (translation) by up to +/- pad pixels, applied with the SAME offsets to x and y.
+    Uses replicate padding + random crop (simple, no extra deps).
+    """
+    if pad <= 0:
+        return x, y
+    if x.shape != y.shape or x.dim() != 4:
+        raise ValueError(f"Expected x,y same shape [B,C,H,W], got x={tuple(x.shape)} y={tuple(y.shape)}")
+    b, c, h, w = x.shape
+    x_p = F.pad(x, (pad, pad, pad, pad), mode="replicate")
+    y_p = F.pad(y, (pad, pad, pad, pad), mode="replicate")
+    off_y = torch.randint(0, 2 * pad + 1, (b,), device=x.device)
+    off_x = torch.randint(0, 2 * pad + 1, (b,), device=x.device)
+    x_out = torch.empty_like(x)
+    y_out = torch.empty_like(y)
+    for i in range(b):
+        oy = int(off_y[i])
+        ox = int(off_x[i])
+        x_out[i] = x_p[i, :, oy:oy + h, ox:ox + w]
+        y_out[i] = y_p[i, :, oy:oy + h, ox:ox + w]
+    return x_out, y_out
+
 
 def main():
     # 1. Load Data
@@ -120,6 +144,11 @@ def main():
 
             optimizer.zero_grad()
 
+            # RandomShift augmentation (same shift for obs & next_obs)
+            if RANDOM_SHIFT_PX and RANDOM_SHIFT_PX > 0:
+                with torch.no_grad():
+                    b_obs, b_next = random_shift_pair(b_obs, b_next, pad=int(RANDOM_SHIFT_PX))
+
             loss, l_pred, l_reg = model(b_obs, b_act, b_next, lambda_coef=LAMBDA)
 
             # DataParallel gathers per-GPU scalars into a 1D tensor; reduce to a scalar for backward/logging.
@@ -145,13 +174,14 @@ def main():
 
     # 4. Save Model
     state_dict = model.module.state_dict() if isinstance(model, torch.nn.DataParallel) else model.state_dict()
-    torch.save(state_dict, 'lejepa_robot.pth')
+    torch.save(state_dict, COMMON.model_path)
     print("Model saved!")
 
     # (Optional) Visualize Loss Curve
     plt.plot(history['loss'], label='Total Loss')
     plt.legend()
     plt.title("LeJEPA Training Progress")
+    plt.savefig("loss_curve.png")
     plt.show()
 
 

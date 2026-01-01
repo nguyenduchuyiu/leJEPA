@@ -47,6 +47,8 @@ class TrainConfig:
     epochs: int = 20
     lambda_coef: float = 0.05
     use_dataparallel: bool = True
+    # Random shift augmentation (in pixels). 0 disables.
+    random_shift_px: int = 0
 
 
 @dataclass

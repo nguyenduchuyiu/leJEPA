@@ -81,12 +81,62 @@ def capture_goal_image(env, renderer, cam_name):
     # --- SỬA LỖI: GHI VÀO INDEX 9:12 (Thay vì 7:10) ---
     data.qpos[9:12] = goal_pos
     data.qvel[9:12] = 0.0
-
+    
     mujoco.mj_forward(model, data)
 
+    # --- BƯỚC 2: TÀNG HÌNH CHI THUẬT (WHITELIST VERSION) ---
+    old_rgba = model.geom_rgba.copy()
+    old_site_rgba = model.site_rgba.copy()
+    
+    # Những thứ BẮT BUỘC PHẢI GIỮ LẠI (Case-insensitive)
+    # world: Bầu trời/nền
+    # table: Cái bàn
+    # wall: Tường chắn
+    # obj: Vật thể cần đẩy
+    # puck: Tên khác của vật thể
+    # goal: Điểm đích (nếu có visual)
+    KEEP_KEYWORDS = ['world', 'table', 'wall', 'obj', 'puck', 'goal']
+
+    for body_id in range(model.nbody):
+        body_name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, body_id)
+        
+        if body_name:
+            # Chuyển về chữ thường để so sánh cho dễ
+            name_lower = body_name.lower()
+            
+            # Logic: Nếu tên body KHÔNG chứa từ khóa an toàn -> ẨN NGAY
+            is_safe = any(safe_key in name_lower for safe_key in KEEP_KEYWORDS)
+            
+            if not is_safe:
+                # Đây là robot hoặc rác -> Hide
+                for geom_id in range(model.ngeom):
+                    if model.geom_bodyid[geom_id] == body_id:
+                        model.geom_rgba[geom_id, 3] = 0.0 # Alpha = 0 (Tàng hình)
+    
+    # 2.2. ẨN SITE (Mấy cái đầu đỏ/Cảm biến) <--- FIX Ở ĐÂY
+    for site_id in range(model.nsite):
+        site_name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_SITE, site_id)
+        body_id = model.site_bodyid[site_id]
+        body_name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, body_id)
+        
+        # Check xem Site này có thuộc về body "an toàn" không
+        # Hoặc check trực tiếp tên site
+        full_name = (str(site_name) + str(body_name)).lower()
+        is_safe = any(safe_key in full_name for safe_key in KEEP_KEYWORDS)
+        
+        if not is_safe:
+            model.site_rgba[site_id, 3] = 0.0 # Tàng hình nốt
+    
+    # --- BƯỚC 3: CHỤP ẢNH ---
+    # Cần update scene thì thay đổi màu sắc mới có hiệu lực
+    renderer.update_scene(data, camera=cam_name)
     # Chụp ảnh goal
     img_goal_chw = grab_frame_np(renderer, data, cam_name)
     img_tensor = torch.tensor(img_goal_chw).float().to(DEVICE) / 255.0
+
+    # Trả lại màu sắc (Hiện hình)
+    model.geom_rgba[:] = old_rgba
+    model.site_rgba[:] = old_site_rgba # Trả lại màu cho Site
 
     # Restore trạng thái cũ
     data.qpos[:] = old_qpos

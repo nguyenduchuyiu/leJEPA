@@ -23,13 +23,14 @@ train:
   epochs: 100
   lambda_coef: 0.05
   use_dataparallel: true
+  random_shift_px: 5
 
 infer:
-  horizon: 20
-  num_samples: 2048
-  temperature: 0.1
+  horizon: 50
+  num_samples: 4096
+  temperature: 0.3
   num_episodes: 100
-  max_steps: 200
+  max_steps: 2000
   preview: true
   preview_wait_ms: 1
   preview_scale: 6

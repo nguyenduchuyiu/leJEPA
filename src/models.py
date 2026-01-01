@@ -1,69 +1,123 @@
-import torch.nn.functional as F
+import torch
 import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
 from src.sigreg import SIGRegLoss
-import torch 
 
+# --- MODULE: SPATIAL SOFTMAX (TRÁI TIM CỦA ROBOT VISION) ---
+class SpatialSoftmax(nn.Module):
+    def __init__(self, num_features, height, width, temperature=None):
+        super().__init__()
+        self.num_features = num_features
+        self.height = height
+        self.width = width
+        self.temperature = nn.Parameter(torch.ones(1) * temperature) if temperature else 1.0
+
+        # Tạo lưới tọa độ (pos_x, pos_y) cố định
+        pos_x, pos_y = np.meshgrid(
+            np.linspace(-1., 1., self.height),
+            np.linspace(-1., 1., self.width)
+        )
+        pos_x = torch.from_numpy(pos_x.reshape(self.height * self.width)).float()
+        pos_y = torch.from_numpy(pos_y.reshape(self.height * self.width)).float()
+        self.register_buffer('pos_x', pos_x)
+        self.register_buffer('pos_y', pos_y)
+
+    def forward(self, feature_map):
+        # feature_map: [B, C, H, W]
+        B, C, H, W = feature_map.shape
+        x = feature_map.view(B, C, -1) # [B, C, H*W]
+        
+        # Tính Softmax trên không gian 2D để tìm "tâm điểm" của sự chú ý
+        softmax_attention = F.softmax(x / self.temperature, dim=-1)
+        
+        # Tính kỳ vọng tọa độ (Expected Coordinate)
+        expected_x = torch.sum(self.pos_x * softmax_attention, dim=2, keepdim=True)
+        expected_y = torch.sum(self.pos_y * softmax_attention, dim=2, keepdim=True)
+        
+        # Kết quả là tọa độ (x, y) của C keypoints -> [B, C*2]
+        expected_xy = torch.cat([expected_x, expected_y], dim=2)
+        return expected_xy.view(B, -1)
+
+# --- MODULE: RESIDUAL MLP BLOCK ---
+class ResBlock(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.fc = nn.Sequential(
+            nn.Linear(dim, dim),
+            nn.LayerNorm(dim),
+            nn.ReLU(),
+            nn.Linear(dim, dim),
+            nn.LayerNorm(dim)
+        )
+    def forward(self, x):
+        return x + self.fc(x) # Skip connection
+
+# --- MAIN MODEL ---
 class LeJEPA_Robot(nn.Module):
-    def __init__(self, action_dim=4, z_dim=64):
+    def __init__(self, action_dim=4, z_dim=128): # Tăng z_dim lên 128
         super().__init__()
         self.z_dim = z_dim
-        
-        # --- Encoder: Image (3, H, W) -> z (z_dim) ---
-        # Use AdaptiveAvgPool2d to support different input sizes (e.g. 64, 96)
-        # while keeping the Linear input feature size stable.
-        self.encoder = nn.Sequential(
-            nn.Conv2d(3, 32, kernel_size=4, stride=2, padding=1), # -> 32x32
+        import numpy as np # Import ở đây để SpatialSoftmax dùng
+
+        # 1. ENCODER (CNN + Spatial Softmax)
+        # Giả sử ảnh vào là 96x96
+        self.conv_net = nn.Sequential(
+            nn.Conv2d(3, 32, 4, 2, 1),   # -> 48x48
             nn.BatchNorm2d(32), nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1), # -> 16x16
+            nn.Conv2d(32, 64, 4, 2, 1),  # -> 24x24
             nn.BatchNorm2d(64), nn.ReLU(),
-            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1), # -> 8x8
+            nn.Conv2d(64, 128, 4, 2, 1), # -> 12x12
             nn.BatchNorm2d(128), nn.ReLU(),
-            nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1), # -> 4x4
+            nn.Conv2d(128, 256, 3, 1, 1),# -> 12x12 (Giữ nguyên size để Spatial Softmax làm việc)
             nn.BatchNorm2d(256), nn.ReLU(),
-            nn.AdaptiveAvgPool2d((4, 4)),
-            nn.Flatten(),
-            nn.Linear(256 * 4 * 4, z_dim),
-            # KHÔNG CẦN BatchNorm cuối cùng vì SIGReg sẽ lo việc chuẩn hóa
         )
         
-        # --- Predictor: (z, action) -> z_next ---
-        self.predictor = nn.Sequential(
+        # Spatial Softmax sẽ biến 256 feature maps 12x12 thành 256 điểm tọa độ (x, y)
+        # Output shape = 256 * 2 = 512
+        self.spatial_softmax = SpatialSoftmax(256, 12, 12, temperature=0.1)
+        
+        # Project về z_dim
+        self.projector = nn.Linear(512, z_dim)
+
+        # 2. PREDICTOR (Residual MLP)
+        # Mạnh hơn MLP thường gấp 10 lần
+        self.predictor_net = nn.Sequential(
             nn.Linear(z_dim + action_dim, 256),
             nn.LayerNorm(256), nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.LayerNorm(256), nn.ReLU(),
-            nn.Linear(256, z_dim) # Output dự đoán z tiếp theo
+            ResBlock(256), # Block 1
+            ResBlock(256), # Block 2
+            ResBlock(256), # Block 3
+            nn.Linear(256, z_dim)
         )
         
-        # Loss components
         self.sigreg = SIGRegLoss(z_dim)
 
     def forward(self, obs, action, next_obs, lambda_coef=0.05): 
-        """
-        obs: [B, 3, H, W]
-        action: [B, 4]
-        next_obs: [B, 3, H, W]
-        lambda_coef: Hệ số cân bằng (Bài báo recommend 0.05 [cite: 2794])
-        """
-        # 1. Encode
-        z_t = self.encoder(obs)
-        z_next_target = self.encoder(next_obs) # Target embedding
+        # Encode
+        h_t = self.conv_net(obs)
+        spatial_t = self.spatial_softmax(h_t)
+        z_t = self.projector(spatial_t)
         
-        # 2. Predict Dynamics
-        # Input: Latent hiện tại + Action
-        z_next_pred = self.predictor(torch.cat([z_t, action], dim=1))
+        h_next = self.conv_net(next_obs)
+        spatial_next = self.spatial_softmax(h_next)
+        z_next_target = self.projector(spatial_next)
         
-        # 3. Prediction Loss (MSE) [cite: 2739]
-        # Học vật lý: Nếu ở z_t làm a_t thì sẽ đến z_next_target
+        # Predict
+        z_next_pred = self.predictor_net(torch.cat([z_t, action], dim=1))
+        
+        # Loss
         loss_pred = F.mse_loss(z_next_pred, z_next_target)
-        
-        # 4. SIGReg Loss (Regularization) [cite: 2746]
-        # Ép không gian latent không bị sập (collapse) về 0
-        # Áp dụng cho cả z_t và z_next_target để đảm bảo toàn không gian đẹp
         loss_reg = self.sigreg(z_t) + self.sigreg(z_next_target)
-        
-        # Tổng Loss: (1 - lambda) * Pred + lambda * Reg
-        # Lưu ý: Bài báo dùng công thức trung bình view, ở đây ta giản lược
         total_loss = (1 - lambda_coef) * loss_pred + lambda_coef * loss_reg
         
         return total_loss, loss_pred, loss_reg
+    
+    # Hàm tiện ích cho Inference
+    def encoder(self, obs):
+        h = self.conv_net(obs)
+        s = self.spatial_softmax(h)
+        return self.projector(s)
+        
+    def predictor(self, z_and_action):
+        return self.predictor_net(z_and_action)
